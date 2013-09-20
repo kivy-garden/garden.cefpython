@@ -66,7 +66,7 @@ class CefBrowser(Widget):
     # Keyboard mode: "global" or "local".
     # 1. Global mode forwards keys to CEF all the time.
     # 2. Local mode forwards keys to CEF only when an editable
-    #    control is focused (input type=text or textarea).
+    #    control is focused (input type=text|password or textarea).
     keyboard_mode = "global"
     
     '''Represent a browser widget for kivy, which can be used like a normal widget.
@@ -190,14 +190,6 @@ class CefBrowser(Widget):
     _js_bindings = None
 
     def set_js_bindings(self):
-        # When browser.Navigate() is called, some bug appears in CEF
-        # that makes CefRenderProcessHandler::OnBrowserDestroyed()
-        # is being called. This destroys the javascript bindings in
-        # the Render process. We have to make the js bindings again,
-        # after the call to Navigate() when OnLoadingStateChange()
-        # is called with isLoading=False. Problem reported here:
-        # http://www.magpcss.org/ceforum/viewtopic.php?f=6&t=11009
-
         if not self._js_bindings:
             self._js_bindings = cefpython.JavascriptBindings(
                 bindToFrames=True, bindToPopups=True)
@@ -205,14 +197,29 @@ class CefBrowser(Widget):
                     self.request_keyboard)
             self._js_bindings.SetFunction("__kivy__release_keyboard",
                     self.release_keyboard)
-
         self.browser.SetJavascriptBindings(self._js_bindings)
     
 
-    def change_url(self, *kwargs):
-        self.browser.Navigate("http://www.google.com/")
-        self._client_handler._reset_js_bindings = True
+    def change_url(self, url, *kwargs):
+        # Doing a javascript redirect instead of Navigate()
+        # solves the js bindings error. The url here need to
+        # be preceded with "http://". Calling StopLoad()
+        # might be a good idea before making the js navigation.
+        
+        self.browser.StopLoad()
+        self.browser.GetMainFrame().ExecuteJavascript(
+               "window.location='%s'"%url)
 
+        # Do not use Navigate() or GetMainFrame()->LoadURL(),
+        # as it causes the js bindings to be removed. There is
+        # a bug in CEF, that happens after a call to Navigate().
+        # The OnBrowserDestroyed() callback is fired and causes 
+        # the js bindings to be removed. See this topic for more 
+        # details:
+        # http://www.magpcss.org/ceforum/viewtopic.php?f=6&t=11009
+
+        # OFF:
+        # | self.browser.Navigate("http://www.youtube.com/")
 
     _keyboard = None
 
@@ -228,13 +235,15 @@ class CefBrowser(Widget):
         self.is_ctrl2 = False
         self.is_alt1 = False
         self.is_alt2 = False
-        # Browser lost its focus after the LoadURL() and the 
-        # OnBrowserDestroyed() callback bug. This will only work
-        # when keyboard mode is local.
+        # Not sure if it is still required to send the focus
+        # (some earlier bug), but it shouldn't hurt to call it.
         self.browser.SendFocusEvent(True)
 
 
     def release_keyboard(self):
+        # When using local keyboard mode, do all the request
+        # and releases of the keyboard through js bindings,
+        # otherwise some focus problems arise.
         self.is_shift1 = False
         self.is_shift2 = False
         self.is_ctrl1 = False
@@ -498,20 +507,41 @@ class CefBrowser(Widget):
 
 class ClientHandler:
 
-    _reset_js_bindings = False
-
     def __init__(self, browserWidget):
         self.browserWidget = browserWidget
 
 
     def _fix_select_boxes(self, frame):
-        # See: http://marcj.github.io/jquery-selectBox/
+        # This is just a temporary fix, until proper Popup widgets
+        # painting is implemented (PET_POPUP in OnPaint). Currently 
+        # there is no way to obtain a native window handle (GtkWindow 
+        # pointer) in Kivy, and this may cause things like context menus,
+        # select boxes and plugins not to display correctly. Although,
+        # this needs to be tested. The popup widget buffers are
+        # available in a separate paint buffer, so they could positioned
+        # freely so that it doesn't go out of the window. So the native
+        # window handle might not necessarily be required to make it work
+        # in most cases (99.9%). Though, this still needs testing to confirm.
+        # --
+        # See this topic on the CEF Forum regarding the NULL window handle:
+        # http://www.magpcss.org/ceforum/viewtopic.php?f=6&t=10851
+        # --
+        # See also a related topic on the Kivy-users group:
+        # https://groups.google.com/d/topic/kivy-users/WdEQyHI5vTs/discussion
+        # --
+        # The javascript select boxes library used: 
+        # http://marcj.github.io/jquery-selectBox/
+        # --
         # Cannot use "file://" urls to load local resources, error:
         # | Not allowed to load local resource
         print("_fix_select_boxes()")
         resources_dir = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
                 "kivy-select-boxes")
+        if not os.path.exists(resources_dir):
+            print("The kivy-select-boxes directory does not exist, " \
+                    "select boxes fix won't be applied.")
+            return
         js_file = os.path.join(resources_dir, "kivy-selectBox.js")
         js_content = ""
         with open(js_file, "r") as myfile:
@@ -592,14 +622,6 @@ class ClientHandler:
             canGoForward):
         print("OnLoadingStateChange(): isLoading = %s" % isLoading)
         browserWidget = browser.GetUserData("browserWidget")
-        if self._reset_js_bindings and not isLoading:
-            if browserWidget:
-                browserWidget.set_js_bindings()
-        if isLoading and browserWidget \
-                and browserWidget.keyboard_mode == "local":
-            # Release keyboard when navigating to a new page.
-            browserWidget.release_keyboard()
-            pass
 
     
     def OnPaint(self, browser, paintElementType, dirtyRects, buffer, width, 
