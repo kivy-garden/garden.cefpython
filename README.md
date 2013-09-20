@@ -3,7 +3,9 @@
 This is a widget that embed https://code.google.com/p/cefpython into a Kivy widget.
 Works currently only on linux 64bits with python 2.7.
 
-More informations to come.
+This project shouldn't considered stable. There are major things (ex. popups) which aren't implemented or causing proplems.
+Tested on Ubuntu 12.04 with the follwoing debian packages installed: libnss3-1d libnspr4-0d
+
 
 # Example
 
@@ -17,3 +19,9 @@ More informations to come.
     CefBrowserApp().run()
     
     cefpython.Shutdown()
+
+
+# Hints
+
+Don't use browser.Navigate() to chang the url. Use the function change_url(url) instead.
+Read in '__init__.py' at function change_url() why.
