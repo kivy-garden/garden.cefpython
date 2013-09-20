@@ -71,7 +71,7 @@ class CefBrowser(Widget):
     
     '''Represent a browser widget for kivy, which can be used like a normal widget.
     '''
-    def __init__(self, start_url='http://www.google.com', **kwargs):
+    def __init__(self, start_url='http://www.google.com/', **kwargs):
         super(CefBrowser, self).__init__(**kwargs)
         
         self.start_url = start_url
@@ -90,7 +90,7 @@ class CefBrowser(Widget):
         '''
         if self.starting:
             if self.height != 100:
-                self.start_cef(self.start_url)
+                self.start_cef()
                 self.starting = False
         else:
             self.texture = Texture.create(
@@ -118,7 +118,7 @@ class CefBrowser(Widget):
         self.rect.texture = self.texture
    
             
-    def start_cef(self, start_url='http://google.com'):
+    def start_cef(self):
         '''Starts CEF. 
         '''
         # create texture & add it to canvas
@@ -136,10 +136,9 @@ class CefBrowser(Widget):
                 "log_file": "debug.log",
                 "release_dcheck_enabled": True, # Enable only when debugging.
                 # This directories must be set on Linux
-                "locales_dir_path": cefpython.GetModuleDirectory() + "/locales",
+                "locales_dir_path": cefpython.GetModuleDirectory()+"/locales",
                 "resources_dir_path": cefpython.GetModuleDirectory(),
                 "browser_subprocess_path": "%s/%s" % (cefpython.GetModuleDirectory(), "subprocess")}
-        print settings
         
         #start idle
         Clock.schedule_interval(self._cef_mes, 0)
@@ -166,22 +165,14 @@ class CefBrowser(Widget):
         # Do not use "about:blank" as navigateUrl - this will cause
         # the GoBack() and GoForward() methods to not work.
         self.browser = cefpython.CreateBrowserSync(windowInfo, browserSettings, 
-                navigateUrl=start_url)
+                navigateUrl=self.start_url)
         
         #set focus
         self.browser.SendFocusEvent(True)
         
-        #Create RenderHandler (in ClientHandler)
-        CH = ClientHandler(self)
-        self.browser.SetClientHandler(CH)
-
-        jsBindings = cefpython.JavascriptBindings(
-            bindToFrames=True, bindToPopups=True)
-        jsBindings.SetFunction("__kivy__request_keyboard", 
-                self.request_keyboard)
-        jsBindings.SetFunction("__kivy__release_keyboard",
-                self.release_keyboard)
-        self.browser.SetJavascriptBindings(jsBindings)
+        self._client_handler = ClientHandler(self)
+        self.browser.SetClientHandler(self._client_handler)
+        self.set_js_bindings()
         
         #Call WasResized() => force cef to call GetViewRect() and OnPaint afterwards
         self.browser.WasResized() 
@@ -192,6 +183,38 @@ class CefBrowser(Widget):
         if self.keyboard_mode == "global":
             self.request_keyboard()
 
+        # Clock.schedule_once(self.change_url, 5)
+    
+    
+    _client_handler = None
+    _js_bindings = None
+
+    def set_js_bindings(self):
+        # When browser.Navigate() is called, some bug appears in CEF
+        # that makes CefRenderProcessHandler::OnBrowserDestroyed()
+        # is being called. This destroys the javascript bindings in
+        # the Render process. We have to make the js bindings again,
+        # after the call to Navigate() when OnLoadingStateChange()
+        # is called with isLoading=False. Problem reported here:
+        # http://www.magpcss.org/ceforum/viewtopic.php?f=6&t=11009
+
+        if not self._js_bindings:
+            self._js_bindings = cefpython.JavascriptBindings(
+                bindToFrames=True, bindToPopups=True)
+            self._js_bindings.SetFunction("__kivy__request_keyboard", 
+                    self.request_keyboard)
+            self._js_bindings.SetFunction("__kivy__release_keyboard",
+                    self.release_keyboard)
+
+        self.browser.SetJavascriptBindings(self._js_bindings)
+    
+
+    def change_url(self, *kwargs):
+        self.browser.Navigate("http://www.google.com/")
+        self._client_handler._reset_js_bindings = True
+
+
+    _keyboard = None
 
     def request_keyboard(self):
         print("request_keyboard()")
@@ -205,6 +228,10 @@ class CefBrowser(Widget):
         self.is_ctrl2 = False
         self.is_alt1 = False
         self.is_alt2 = False
+        # Browser lost its focus after the LoadURL() and the 
+        # OnBrowserDestroyed() callback bug. This will only work
+        # when keyboard mode is local.
+        self.browser.SendFocusEvent(True)
 
 
     def release_keyboard(self):
@@ -471,11 +498,44 @@ class CefBrowser(Widget):
 
 class ClientHandler:
 
+    _reset_js_bindings = False
+
     def __init__(self, browserWidget):
         self.browserWidget = browserWidget
 
 
+    def _fix_select_boxes(self, frame):
+        # See: http://marcj.github.io/jquery-selectBox/
+        # Cannot use "file://" urls to load local resources, error:
+        # | Not allowed to load local resource
+        print("_fix_select_boxes()")
+        resources_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "kivy-select-boxes")
+        js_file = os.path.join(resources_dir, "kivy-selectBox.js")
+        js_content = ""
+        with open(js_file, "r") as myfile:
+            js_content = myfile.read()
+        css_file = os.path.join(resources_dir, "kivy-selectBox.css")
+        css_content = ""
+        with open(css_file, "r") as myfile:
+            css_content = myfile.read()
+        css_content = css_content.replace("\r", "")
+        css_content = css_content.replace("\n", "")
+        jsCode = """
+            %(js_content)s
+            var head = document.getElementsByTagName('head')[0];
+            var style = document.createElement('style');
+            style.type = 'text/css';
+            style.appendChild(document.createTextNode("%(css_content)s"));
+            head.appendChild(style);
+        """ % locals()
+        frame.ExecuteJavascript(jsCode, 
+                "kivy_.py > ClientHandler > OnLoadStart > _fix_select_boxes()")
+
+
     def OnLoadStart(self, browser, frame):
+        self._fix_select_boxes(frame);
         browserWidget = browser.GetUserData("browserWidget")
         if browserWidget and browserWidget.keyboard_mode == "local":
             print("OnLoadStart(): injecting focus listeners for text controls")
@@ -512,16 +572,29 @@ class ClientHandler:
                         __kivy__keyboard_requested = false;
                     }
                 }
-                setInterval(__kivy__keyboard_interval, 13);
+                setInterval(__kivy__keyboard_interval, 100);
             """
             frame.ExecuteJavascript(jsCode, 
                     "kivy_.py > ClientHandler > OnLoadStart")
+
+
+    def OnLoadEnd(self, browser, frame, httpStatusCode):
+        # Browser lost its focus after the LoadURL() and the 
+        # OnBrowserDestroyed() callback bug. When keyboard mode
+        # is local the fix is in the request_keyboard() method.
+        # Call it from OnLoadEnd only when keyboard mode is global.
+        browserWidget = browser.GetUserData("browserWidget")
+        if browserWidget and browserWidget.keyboard_mode == "global":
+            browser.SendFocusEvent(True)
 
     
     def OnLoadingStateChange(self, browser, isLoading, canGoBack,
             canGoForward):
         print("OnLoadingStateChange(): isLoading = %s" % isLoading)
         browserWidget = browser.GetUserData("browserWidget")
+        if self._reset_js_bindings and not isLoading:
+            if browserWidget:
+                browserWidget.set_js_bindings()
         if isLoading and browserWidget \
                 and browserWidget.keyboard_mode == "local":
             # Release keyboard when navigating to a new page.
@@ -546,12 +619,14 @@ class ClientHandler:
                 
         return True
     
+
     def GetViewRect(self, browser, rect):
         width, height = self.browserWidget.texture.size
         rect.append(0)
         rect.append(0)
         rect.append(width)
         rect.append(height)
+        # print("GetViewRect(): %s x %s" % (width, height))
         return True
 
 
