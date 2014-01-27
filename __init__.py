@@ -33,27 +33,38 @@ cef_dir = join(
     '{}{}.py{}'.format(platform(), BITS, PYVERSION)
 )
 
-# correctly locate libcef.so (we need to extend LD_LIBRARY_PATH for subprocess
-# executable)
-libcef_so = join(cef_dir, 'libcef.so')
+subprocess = "subprocess"
 
+# correctly locate libcef.so (we need to extend
+# LD_LIBRARY_PATH for subprocess executable)
 if platform() == 'linux':
+    libcef = join(cef_dir, 'libcef.so')
     LD_LIBRARY_PATH = os.environ.get('LD_LIBRARY_PATH', None)
     if not LD_LIBRARY_PATH:
         LD_LIBRARY_PATH = cef_dir
     else:
-        LD_LIBRARY_PATH += ',' + cef_dir
+        LD_LIBRARY_PATH += os.pathsep + cef_dir
     os.putenv('LD_LIBRARY_PATH', LD_LIBRARY_PATH)
+# Add the DLL and export the PATH for windows
+elif platform() == 'win':
+    subprocess += ".exe"
+    libcef = join(cef_dir, 'libcef.dll')
+    PATH = os.environ.get('PATH', None)
+    if not PATH:
+        PATH = cef_dir
+    else:
+        PATH += os.pathsep + cef_dir
+    os.putenv('PATH', PATH)
 else:
     raise Exception('Unsupported/untested platform, please remove when its done.')
 
 # extend the path to add the python extension
 sys.path += [cef_dir]
 
-print 'Going to import {}'.format(libcef_so)
-if exists(libcef_so):
+print 'Going to import {}'.format(libcef)
+if exists(libcef):
     # Import local module
-    ctypes.CDLL(libcef_so, ctypes.RTLD_GLOBAL)
+    ctypes.CDLL(libcef, ctypes.RTLD_GLOBAL)
     if 0x02070000 <= sys.hexversion < 0x03000000:
         import cefpython_py27 as cefpython
     else:
