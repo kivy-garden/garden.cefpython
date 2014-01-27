@@ -1,7 +1,7 @@
 # CEF widget
 
 This is a widget that embed https://code.google.com/p/cefpython into a Kivy widget.
-Works currently only on linux 64bits with python 2.7.
+Works currently on Linux and Windows 64bit with python 2.7.
 
 This project shouldn't considered stable. There are major things (ex. popups) which aren't implemented or causing proplems.
 Tested on Ubuntu 12.04 with the follwoing debian packages installed: libnss3-1d libnspr4-0d
