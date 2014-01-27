@@ -136,7 +136,7 @@ class CefBrowser(Widget):
         self.texture.flip_vertical()
         with self.canvas:
             Color(1, 1, 1)
-            self.rect = Rectangle(size=self.size, texture=self.texture)
+            self.rect = Rectangle(size=self.size, texture=self.texture, pos=self.pos)
 
         #configure cef
         cefpython.g_debug = True
@@ -500,29 +500,46 @@ class CefBrowser(Widget):
         if not self.collide_point(*touch.pos):
             return
         touch.grab(self)
-        
-        y = self.height-touch.pos[1]
-        self.browser.SendMouseClickEvent(touch.x, y, cefpython.MOUSEBUTTON_LEFT,
-                                         mouseUp=False, clickCount=1)
-    
-    
+
+        y = self.height-touch.pos[1] + self.pos[1]
+        x = touch.x - self.pos[0]
+        self.browser.SendMouseClickEvent(
+            x,
+            y,
+            cefpython.MOUSEBUTTON_LEFT,
+            mouseUp=False,
+            clickCount=1
+        )
+
+        return True;
+
+
     def on_touch_move(self, touch, *kwargs):
         if touch.grab_current is not self:
             return
-        
-        y = self.height-touch.pos[1]
-        self.browser.SendMouseMoveEvent(touch.x, y, mouseLeave=False)
-        
-        
+
+        y = self.height-touch.pos[1] + self.pos[1]
+        x = touch.x - self.pos[0]
+        self.browser.SendMouseMoveEvent(x, y, mouseLeave=False)
+
+        return True;
+
     def on_touch_up(self, touch, *kwargs):
         if touch.grab_current is not self:
             return
-        
-        y = self.height-touch.pos[1]
-        self.browser.SendMouseClickEvent(touch.x, y, cefpython.MOUSEBUTTON_LEFT,
-                                         mouseUp=True, clickCount=1)
+
+        y = self.height-touch.pos[1] + self.pos[1]
+        x = touch.x - self.pos[0]
+        self.browser.SendMouseClickEvent(
+            x,
+            y,
+            cefpython.MOUSEBUTTON_LEFT,
+            mouseUp=True, clickCount=1
+        )
+
         touch.ungrab(self)
 
+        return True;
 
 class ClientHandler:
 
