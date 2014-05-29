@@ -6,6 +6,7 @@ Works currently on Linux and Windows 64bit with python 2.7.
 This project shouldn't considered stable. There are major things (ex. popups) which aren't implemented or causing proplems.
 Tested on Ubuntu 12.04 with the follwoing debian packages installed: libnss3-1d libnspr4-0d
 
+There's another project which wraps cefpython into kivy but isn't installable in the garden way, which may be further developed: https://github.com/rentouch/cefkivy
 
 # Example
 
